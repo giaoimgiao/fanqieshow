@@ -105,16 +105,109 @@ public class Main implements IXposedHookLoadPackage {
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (!cfgEnabled) return;
                     String url = findUrlField(param.thisObject);
-                    String extra = "";
-                    if ("onSucceeded".equals(methodName) && param.args != null && param.args.length > 0) {
-                        extra = " info=" + param.args[0].getClass().getSimpleName();
+                    if (url != null && !isInteresting(url)) return; // 只记录业务接口
+                    log("<< " + methodName + (url != null ? " [" + shortUrl(url) + "]" : ""));
+
+                    // v1.1: 抓取响应体 (onReadCompleted 第三参/字段中的 ByteBuffer)
+                    if ("onReadCompleted".equals(methodName)) {
+                        String body = extractBodyFromArgs(param.args);
+                        if (body == null) {
+                            body = extractBodyFromFields(param.thisObject);
+                        }
+                        if (body != null) {
+                            log("    BODY(" + body.length() + "): " + body);
+                        }
                     }
-                    log("<< " + methodName + (url != null ? " [" + url + "]" : "") + extra);
                 }
             });
         } catch (Throwable t) {
             log("hook " + methodName + " 失败: " + t);
         }
+    }
+
+    /** 从回调参数中提取响应体 (标准 Cronet onReadCompleted 第三参为 ByteBuffer) */
+    private static String extractBodyFromArgs(Object[] args) {
+        if (args == null) return null;
+        for (Object a : args) {
+            String s = dumpBuffer(a);
+            if (s != null) return s;
+        }
+        return null;
+    }
+
+    /** 从对象字段中提取响应体 */
+    private static String extractBodyFromFields(Object obj) {
+        if (obj == null) return null;
+        Class<?> c = obj.getClass();
+        while (c != null && c != Object.class) {
+            for (Field f : c.getDeclaredFields()) {
+                try {
+                    f.setAccessible(true);
+                    Object v = f.get(obj);
+                    String s = dumpBuffer(v);
+                    if (s != null) return s;
+                } catch (Throwable ignored) {
+                }
+            }
+            c = c.getSuperclass();
+        }
+        return null;
+    }
+
+    /** 将 ByteBuffer/byte[] 转为可读字符串 (判断 JSON/protobuf)，过长截断 */
+    private static String dumpBuffer(Object v) {
+        if (v == null) return null;
+        try {
+            byte[] bytes = null;
+            if (v instanceof ByteBuffer) {
+                ByteBuffer bb = (ByteBuffer) v;
+                if (bb.position() == 0 && bb.limit() == bb.capacity()) return null; // 空缓冲
+                int len = Math.min(bb.position() > 0 ? bb.position() : bb.limit(), 4096);
+                bytes = new byte[len];
+                ByteBuffer dup = bb.duplicate();
+                dup.position(0);
+                dup.get(bytes, 0, len);
+            } else if (v instanceof byte[]) {
+                bytes = (byte[]) v;
+                if (bytes.length == 0) return null;
+            } else {
+                return null;
+            }
+            if (bytes == null || bytes.length == 0) return null;
+            // 判断: JSON 文本 or 二进制
+            boolean text = true;
+            for (int i = 0; i < Math.min(bytes.length, 64); i++) {
+                int b = bytes[i] & 0xFF;
+                if (b == 0 || (b < 0x09) || (b > 0x7E && b < 0xA0)) { text = false; break; }
+            }
+            if (text) {
+                return new String(bytes, "UTF-8");
+            } else {
+                StringBuilder sb = new StringBuilder("[BINARY ");
+                sb.append(bytes.length).append("B:");
+                for (int i = 0; i < Math.min(bytes.length, 24); i++) {
+                    sb.append(String.format("%02X", bytes[i] & 0xFF)).append(' ');
+                }
+                return sb.append("...]").toString();
+            }
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 是否是需要关注的业务接口 */
+    private static boolean isInteresting(String url) {
+        String u = url.toLowerCase();
+        return u.contains("/statistic/") || u.contains("level_config") || u.contains("income")
+                || u.contains("book_daily") || u.contains("book_summary") || u.contains("monthly")
+                || u.contains("user/info") || u.contains("wallet") || u.contains("medal")
+                || u.contains("growth_task") || u.contains("book_list") || u.contains("author");
+    }
+
+    /** URL 截断显示 */
+    private static String shortUrl(String url) {
+        int q = url.indexOf('?');
+        return q > 0 ? url.substring(0, q) : url;
     }
 
     /** 反射遍历字段找 URL（String 且 http 开头） */
