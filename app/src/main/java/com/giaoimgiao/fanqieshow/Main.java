@@ -95,6 +95,103 @@ public class Main implements IXposedHookLoadPackage {
             log("hook 失败: " + t);
             XposedBridge.log("FanqieShow hook error: " + t);
         }
+
+        // ===== v2: hook 应用层最终回调 VersionSafeCallbacks$UrlRequestCallback =====
+        // 此处 ByteBuffer 是 App 即将读取的响应体: dump 完整数据 + 改写装逼数值
+        try {
+            final Class<?> cb = XposedHelpers.findClass(
+                    "com.ttnet.org.chromium.net.impl.VersionSafeCallbacks$UrlRequestCallback",
+                    lpparam.classLoader);
+            log("找到 VersionSafeCallbacks$UrlRequestCallback: " + cb.getName());
+
+            XposedBridge.hookAllMethods(cb, "onReadCompleted", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (!cfgEnabled) return;
+                    String url = null;
+                    try {
+                        // args[1] = UrlResponseInfo, 标准 getUrl()
+                        url = (String) param.args[1].getClass().getMethod("getUrl").invoke(param.args[1]);
+                    } catch (Throwable ignored) {
+                    }
+                    if (url == null || !isInteresting(url)) return;
+                    ByteBuffer bb = (ByteBuffer) param.args[2];
+                    String body = dumpBuffer(bb);
+                    if (body == null) return;
+                    log("CALLBACK << " + shortUrl(url) + " BODY(" + body.length() + "): " + body);
+
+                    // v2: 改写响应
+                    String modified = modifyResponse(url, body);
+                    if (modified != null && !modified.equals(body)) {
+                        try {
+                            byte[] nb = modified.getBytes("UTF-8");
+                            bb.clear();
+                            bb.put(nb);
+                            bb.flip();
+                            log("    ✏️ 已改写: " + shortUrl(url) + " (" + body.length() + " -> " + nb.length + "B)");
+                        } catch (Throwable t) {
+                            log("    改写失败: " + t);
+                        }
+                    }
+                }
+            });
+
+            XposedBridge.hookAllMethods(cb, "onSucceeded", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (!cfgEnabled) return;
+                    String url = null;
+                    try {
+                        url = (String) param.args[1].getClass().getMethod("getUrl").invoke(param.args[1]);
+                    } catch (Throwable ignored) {
+                    }
+                    if (url != null && isInteresting(url)) {
+                        log("CALLBACK DONE << " + shortUrl(url));
+                    }
+                }
+            });
+
+            log("v2 改写 hook 安装完成");
+        } catch (Throwable t) {
+            log("v2 hook 失败: " + t);
+            XposedBridge.log("FanqieShow v2 hook error: " + t);
+        }
+    }
+
+    /** v2: 按接口 URL 改写响应 JSON (仅本机显示层, 不改服务器数据) */
+    private static String modifyResponse(String url, String body) {
+        if (body == null || !body.startsWith("{")) return null;
+        try {
+            if (url.contains("statistic/overview/book_common")) {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                org.json.JSONObject data = root.optJSONObject("data");
+                if (data == null) return null;
+                if (cfgIncome != null && !cfgIncome.isEmpty())
+                    data.put("last_daily_income", cfgIncome);          // 每日收益
+                if (cfgReading != null && !cfgReading.isEmpty())
+                    data.put("last_reader_uv_14day_count", cfgReading); // 在读UV
+                if (cfgReaders != null && !cfgReaders.isEmpty())
+                    data.put("last_read_count", cfgReaders);            // 阅读人数
+                if (cfgMonthly != null && !cfgMonthly.isEmpty())
+                    data.put("last_monthly_income", cfgMonthly);        // 月度收益
+                return root.toString();
+            }
+            if (url.contains("statistic/overview/book_list") || url.contains("statistic/overview/book_common")) {
+                // book_list 作品列表页 read_count 也可以改(可选扩展)
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                org.json.JSONArray arr = root.optJSONObject("data") == null ? null
+                        : root.optJSONObject("data").optJSONArray("stats_book_list");
+                if (arr != null && cfgReaders != null && !cfgReaders.isEmpty()) {
+                    for (int i = 0; i < arr.length(); i++) {
+                        arr.getJSONObject(i).put("read_count", cfgReaders);
+                    }
+                    return root.toString();
+                }
+            }
+        } catch (Throwable t) {
+            log("modifyResponse 异常: " + t);
+        }
+        return null;
     }
 
     /** 钩住指定名字的所有回调方法（ttnet 内部类也覆盖） */
