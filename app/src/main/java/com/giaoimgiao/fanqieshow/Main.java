@@ -179,12 +179,34 @@ public class Main implements IXposedHookLoadPackage {
                 return root.toString();
             }
             if (url.contains("level_config") && cfgLevelName != null && !cfgLevelName.isEmpty()) {
-                // 等级配置: 把所有等级名 "Lv.N" 全部替换为用户配置等级名(如"破解大神")
-                // App按成长分匹配levels[].point决定当前等级, 全替换后无论匹配哪级都显示配置名
+                // v2.4: 等级卡"整卡替换" —— 用户当前等级(Lv.1, id=200)对象的全部样式字段
+                // 换成最高等级(Lv.4)的样式: 图标/勋章/背景/动效资源URL lv1->lv4(已逐一验证CDN存在),
+                // 颜色替换为殿堂金色系. 仅改本机显示层, App匹配逻辑(id/point)不动, 进度条不乱.
                 String esc = cfgLevelName.replace("\\", "\\\\").replace("\"", "\\\"");
-                String replaced = body.replaceAll("\"name\":\"Lv\\.[0-9]+\"", "\"name\":\"" + esc + "\"");
-                if (!replaced.equals(body)) {
-                    return replaced;
+                String r = body;
+                // 1) 所有等级名 "Lv.N" -> 配置名 (无论匹配哪级都显示配置名, 如"破解大神")
+                r = r.replaceAll("\"name\":\"Lv\\.[0-9]+\"", "\"name\":\"" + esc + "\"");
+                // 2) Lv.1对象全部资源URL -> Lv.4 (icon/勋章/封面/背景/动效)
+                r = r.replace("lv1", "lv4");
+                r = r.replace("author_level_1", "author_level_4");
+                // 2b) Lv.4不存在的两个背景资源 -> 用已验证存在的 385_app_bg_lv4_new.png
+                r = r.replace("author-level/level_bg_lv4.png", "author-level/385-level/385_app_bg_lv4_new.png");
+                r = r.replace("author-level/mine_bg_lv4.png", "author-level/385-level/385_app_bg_lv4_new.png");
+                // 3) Lv.1专属颜色 -> 殿堂金色系 (这些色值在响应中仅Lv.1使用, 全局唯一)
+                r = r.replace("0xFF295EAF", "0xFFD4AF37");   // app_theme_color 金
+                r = r.replace("0xFF96B5E4", "0xFFFFD700");   // app_card_colors 金
+                r = r.replace("0xFFDAE6F9", "0xFFB8860B");   // app_card_colors 暗金
+                r = r.replace("0xFF85B0F0", "0xFFFFD700");   // app_progress_colors 金
+                r = r.replace("0xFF5E8ED4", "0xFFDAA520");   // app_progress_colors 暗金
+                r = r.replace("#295EAF", "#B8860B");         // pc_theme_color
+                r = r.replace("#5E8ED4", "#DAA520");         // pc_progress_color
+                r = r.replace("#85B0F0", "#FFD700");         // pc_progress_color
+                r = r.replace("#DAE6F9", "#FFE4B5");         // pc_home_tag_background
+                // 4) 头衔文本 "作家Lv.1" -> 配置名; 升级条件文案 -> 满级文案
+                r = r.replace("\"fanqie_title_text\":\"作家Lv.1\"", "\"fanqie_title_text\":\"" + esc + "\"");
+                r = r.replace("(成长分达到400分)", "(已达成殿堂级)");
+                if (!r.equals(body)) {
+                    return r;
                 }
             }
             if (url.contains("statistic/overview/book_list") || url.contains("statistic/overview/book_common")) {
@@ -270,7 +292,7 @@ public class Main implements IXposedHookLoadPackage {
             if (v instanceof ByteBuffer) {
                 ByteBuffer bb = (ByteBuffer) v;
                 if (bb.position() == 0 && bb.limit() == bb.capacity()) return null; // 空缓冲
-                int len = Math.min(bb.position() > 0 ? bb.position() : bb.limit(), 8192);
+                int len = Math.min(bb.position() > 0 ? bb.position() : bb.limit(), 32768);
                 bytes = new byte[len];
                 ByteBuffer dup = bb.duplicate();
                 dup.position(0);
