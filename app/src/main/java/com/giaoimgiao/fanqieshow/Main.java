@@ -162,7 +162,7 @@ public class Main implements IXposedHookLoadPackage {
             if (v instanceof ByteBuffer) {
                 ByteBuffer bb = (ByteBuffer) v;
                 if (bb.position() == 0 && bb.limit() == bb.capacity()) return null; // 空缓冲
-                int len = Math.min(bb.position() > 0 ? bb.position() : bb.limit(), 4096);
+                int len = Math.min(bb.position() > 0 ? bb.position() : bb.limit(), 8192);
                 bytes = new byte[len];
                 ByteBuffer dup = bb.duplicate();
                 dup.position(0);
@@ -174,21 +174,25 @@ public class Main implements IXposedHookLoadPackage {
                 return null;
             }
             if (bytes == null || bytes.length == 0) return null;
-            // 判断: JSON 文本 or 二进制
+            // 判断: JSON 文本 or 二进制 (UTF-8中文 >=0x80 视为文本候选)
             boolean text = true;
-            for (int i = 0; i < Math.min(bytes.length, 64); i++) {
+            for (int i = 0; i < Math.min(bytes.length, 128); i++) {
                 int b = bytes[i] & 0xFF;
-                if (b == 0 || (b < 0x09) || (b > 0x7E && b < 0xA0)) { text = false; break; }
+                if (b == 0 || (b < 0x20 && b != '\n' && b != '\r' && b != '\t')) { text = false; break; }
             }
             if (text) {
                 return new String(bytes, "UTF-8");
             } else {
+                // 二进制: 同时输出 UTF-8 预览便于识别 (可能是误判的JSON)
                 StringBuilder sb = new StringBuilder("[BINARY ");
                 sb.append(bytes.length).append("B:");
                 for (int i = 0; i < Math.min(bytes.length, 24); i++) {
                     sb.append(String.format("%02X", bytes[i] & 0xFF)).append(' ');
                 }
-                return sb.append("...]").toString();
+                sb.append("] UTF8预览: ");
+                String preview = new String(bytes, "UTF-8");
+                if (preview.length() > 300) preview = preview.substring(0, 300);
+                return sb.append(preview.replaceAll("[\\p{Cntrl}&&[^\\r\\n\\t]]", "?")).toString();
             }
         } catch (Throwable t) {
             return null;
