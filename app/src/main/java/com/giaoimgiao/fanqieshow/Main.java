@@ -69,7 +69,7 @@ public class Main implements IXposedHookLoadPackage {
             log("找到 CronetUrlRequest: " + clazz.getName());
 
             // 1) 构造器: 捕获请求 URL
-            XposedHelpers.hookAllConstructors(clazz, new XC_MethodHook() {
+            XposedBridge.hookAllConstructors(clazz, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (!cfgEnabled) return;
@@ -100,7 +100,7 @@ public class Main implements IXposedHookLoadPackage {
     /** 钩住指定名字的所有回调方法（ttnet 内部类也覆盖） */
     private void hookCallback(Class<?> clazz, final String methodName) {
         try {
-            XposedHelpers.hookAllMethods(clazz, methodName, new XC_MethodHook() {
+            XposedBridge.hookAllMethods(clazz, methodName, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (!cfgEnabled) return;
