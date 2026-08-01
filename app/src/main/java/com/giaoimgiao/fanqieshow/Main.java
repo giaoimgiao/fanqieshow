@@ -128,7 +128,8 @@ public class Main implements IXposedHookLoadPackage {
                             byte[] nb = modified.getBytes("UTF-8");
                             bb.clear();
                             bb.put(nb);
-                            bb.flip();
+                            // 关键: 不调用flip()! Cronet回调时buffer语义为 position=写入量/limit=capacity,
+                            // 应用会自行flip()后读取; 若这里flip则应用再flip会读到limit=0 → 显示"--"
                             log("    ✏️ 已改写: " + shortUrl(url) + " (" + body.length() + " -> " + nb.length + "B)");
                         } catch (Throwable t) {
                             log("    改写失败: " + t);
@@ -176,6 +177,15 @@ public class Main implements IXposedHookLoadPackage {
                 if (cfgMonthly != null && !cfgMonthly.isEmpty())
                     data.put("last_monthly_income", cfgMonthly);        // 月度收益
                 return root.toString();
+            }
+            if (url.contains("level_config") && cfgLevelName != null && !cfgLevelName.isEmpty()) {
+                // 等级配置: 把 levels[0](默认等级) 名字改为用户配置等级名(如"殿堂")
+                // 用字符串替换(响应分块, 不能整体JSON解析)
+                String esc = cfgLevelName.replace("\\", "\\\\").replace("\"", "\\\"");
+                String replaced = body.replaceFirst("\"name\":\"Lv\\.0\"", "\"name\":\"" + esc + "\"");
+                if (!replaced.equals(body)) {
+                    return replaced;
+                }
             }
             if (url.contains("statistic/overview/book_list") || url.contains("statistic/overview/book_common")) {
                 // book_list 作品列表页 read_count 也可以改(可选扩展)

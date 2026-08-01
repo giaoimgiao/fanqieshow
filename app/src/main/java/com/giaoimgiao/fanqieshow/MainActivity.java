@@ -70,17 +70,17 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("🍅 FanqieShow 番茄装逼");
+        title.setText("🍅 FanqieShow 番茄装逼 v2.2");
         title.setTextSize(22);
         title.setGravity(Gravity.CENTER);
         title.setPadding(0, 0, 0, dp(6));
         root.addView(title);
 
         TextView sub = new TextView(this);
-        sub.setText("v2.1 改写版 · 数据页数值实时生效\n(阅读/在读/收益/稿费已可改写；等级接口适配中)");
+        sub.setText("本机显示层修改 · 数据页实时生效\n(阅读/在读/日收益/月稿费/等级名)");
         sub.setTextSize(12);
         sub.setGravity(Gravity.CENTER);
-        sub.setPadding(0, 0, 0, dp(16));
+        sub.setPadding(0, 0, 0, dp(14));
         root.addView(sub);
 
         // ---- 总开关 ----
@@ -96,11 +96,13 @@ public class MainActivity extends Activity {
         rowSw.addView(swEnabled);
         root.addView(rowSw);
 
-        // ---- 输入项 ----
-        etLevel = addInput(root, "作家等级 (LV数字，如 1/2/12)", InputType.TYPE_CLASS_NUMBER);
-        etLevelName = addInput(root, "等级名 (金番/殿堂/白金等)", InputType.TYPE_CLASS_TEXT);
-        etReaders = addInput(root, "每日阅读人数", InputType.TYPE_CLASS_NUMBER);
-        etReading = addInput(root, "每日在读人数", InputType.TYPE_CLASS_NUMBER);
+        root.addView(sectionLabel("🏅 作家等级"));
+        etLevel = addInput(root, "等级数值 (LV，如 10)", InputType.TYPE_CLASS_NUMBER);
+        etLevelName = addInput(root, "等级名 (如 殿堂/金番/白金)", InputType.TYPE_CLASS_TEXT);
+
+        root.addView(sectionLabel("📊 作品数据 (每日)"));
+        etReaders = addInput(root, "阅读人数", InputType.TYPE_CLASS_NUMBER);
+        etReading = addInput(root, "在读人数", InputType.TYPE_CLASS_NUMBER);
         etIncome = addInput(root, "每日收益 (元)", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         etMonthly = addInput(root, "每月稿费 (元)", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
 
@@ -148,6 +150,14 @@ public class MainActivity extends Activity {
         root.addView(tip);
 
         setContentView(scroll);
+    }
+
+    private TextView sectionLabel(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(15);
+        tv.setPadding(0, dp(12), 0, dp(2));
+        return tv;
     }
 
     private EditText addInput(LinearLayout root, String hint, int inputType) {
