@@ -123,19 +123,27 @@ public class Main implements IXposedHookLoadPackage {
 
                     // v2: 改写响应
                     String modified = modifyResponse(url, body);
-                    if (modified != null && !modified.equals(body)) {
-                        try {
-                            byte[] nb = modified.getBytes("UTF-8");
-                            bb.clear();
-                            bb.put(nb);
-                            // 关键: 不调用flip()! Cronet回调时buffer语义为 position=写入量/limit=capacity,
-                            // 应用会自行flip()后读取; 若这里flip则应用再flip会读到limit=0 → 显示"--"
-                            log("    ✏️ 已改写: " + shortUrl(url) + " (" + body.length() + " -> " + nb.length + "B)");
-                        } catch (Throwable t) {
-                            log("    改写失败: " + t);
-                        }
+            if (modified != null && !modified.equals(body)) {
+                try {
+                    byte[] nb = modified.getBytes("UTF-8");
+                    // v2.5 溢出保护: Cronet分块buffer容量有限(如level_config第一块≈29916B),
+                    // 替换后若超出容量直接put会抛BufferOverflowException并冒泡给App → "网络错误".
+                    // 超容量时放弃本次改写, 保证App正常展示(宁可不改也不崩).
+                    if (nb.length > bb.capacity()) {
+                        log("    ⚠️ 跳过改写(溢出保护): " + shortUrl(url) + " 新" + nb.length
+                                + "B > 缓冲" + bb.capacity() + "B, 原" + body.length() + "B");
+                    } else {
+                        bb.clear();
+                        bb.put(nb);
+                        // 关键: 不调用flip()! Cronet回调时buffer语义为 position=写入量/limit=capacity,
+                        // 应用会自行flip()后读取; 若这里flip则应用再flip会读到limit=0 → 显示"--"
+                        log("    ✏️ 已改写: " + shortUrl(url) + " (" + body.length() + " -> " + nb.length + "B)");
                     }
+                } catch (Throwable t) {
+                    log("    改写失败: " + t);
                 }
+            }
+            }
             });
 
             XposedBridge.hookAllMethods(cb, "onSucceeded", new XC_MethodHook() {
@@ -333,9 +341,10 @@ public class Main implements IXposedHookLoadPackage {
     private static boolean isInteresting(String url) {
         String u = url.toLowerCase();
         return u.contains("/statistic/") || u.contains("level_config") || u.contains("income")
-                || u.contains("book_daily") || u.contains("book_summary") || u.contains("monthly")
-                || u.contains("user/info") || u.contains("wallet") || u.contains("medal")
-                || u.contains("growth_task") || u.contains("book_list") || u.contains("author");
+            || u.contains("book_daily") || u.contains("book_summary") || u.contains("monthly")
+            || u.contains("user/info") || u.contains("wallet") || u.contains("medal")
+            || u.contains("growth_task") || u.contains("book_list") || u.contains("author")
+            || u.contains("account/info"); // v2.5: 作者账户信息(等级分嫌疑: 当前等级分726不在此前任何已记录接口)
     }
 
     /** URL 截断显示 */
