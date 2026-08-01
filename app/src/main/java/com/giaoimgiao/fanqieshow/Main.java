@@ -179,10 +179,10 @@ public class Main implements IXposedHookLoadPackage {
                 return root.toString();
             }
             if (url.contains("level_config") && cfgLevelName != null && !cfgLevelName.isEmpty()) {
-                // 等级配置: 把 levels[0](默认等级) 名字改为用户配置等级名(如"殿堂")
-                // 用字符串替换(响应分块, 不能整体JSON解析)
+                // 等级配置: 把所有等级名 "Lv.N" 全部替换为用户配置等级名(如"破解大神")
+                // App按成长分匹配levels[].point决定当前等级, 全替换后无论匹配哪级都显示配置名
                 String esc = cfgLevelName.replace("\\", "\\\\").replace("\"", "\\\"");
-                String replaced = body.replaceFirst("\"name\":\"Lv\\.0\"", "\"name\":\"" + esc + "\"");
+                String replaced = body.replaceAll("\"name\":\"Lv\\.[0-9]+\"", "\"name\":\"" + esc + "\"");
                 if (!replaced.equals(body)) {
                     return replaced;
                 }
