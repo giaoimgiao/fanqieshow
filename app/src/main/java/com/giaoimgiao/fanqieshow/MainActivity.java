@@ -77,7 +77,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView sub = new TextView(this);
-        sub.setText("本机显示层修改 · v1.0 监听版\n(修改值将在 v2 生效，当前版本记录接口日志)");
+        sub.setText("v2.1 改写版 · 数据页数值实时生效\n(阅读/在读/收益/稿费已可改写；等级接口适配中)");
         sub.setTextSize(12);
         sub.setGravity(Gravity.CENTER);
         sub.setPadding(0, 0, 0, dp(16));

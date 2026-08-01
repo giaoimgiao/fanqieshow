@@ -108,6 +108,7 @@ public class Main implements IXposedHookLoadPackage {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (!cfgEnabled) return;
+                    loadConfig(); // 每次响应前重载配置, 改配置实时生效
                     String url = null;
                     try {
                         // args[1] = UrlResponseInfo, 标准 getUrl()
@@ -352,15 +353,44 @@ public class Main implements IXposedHookLoadPackage {
         return null;
     }
 
-    /** 读取 /sdcard/Download/fanqieshow.conf 用户配置 */
+    /** 读取用户配置: 优先番茄私有目录(必可读), 兜底 /sdcard/Download */
     private static void loadConfig() {
-        try {
-            File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-            File conf = new File(dir, CONFIG_FILE);
-            if (!conf.exists()) {
-                log("配置文件不存在: " + conf.getAbsolutePath() + " (使用默认值)");
-                return;
+        String sigBefore = cfgSignature();
+        boolean loaded = false;
+        // 1) 番茄应用私有目录(模块注入后必可读写, 由root同步脚本写入)
+        File f1 = new File("/data/data/" + TARGET_PKG + "/files/" + CONFIG_FILE);
+        if (parseConfigFile(f1)) {
+            loaded = true;
+        }
+        // 2) 兜底: /sdcard/Download (番茄无权限时EACCES, 自动跳过)
+        if (!loaded) {
+            File f2 = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), CONFIG_FILE);
+            if (parseConfigFile(f2)) {
+                loaded = true;
             }
+        }
+        if (!loaded) {
+            if (!cfgLoggedMissing) {
+                log("配置文件不可读 (番茄私有目录与Download均失败), 使用默认值");
+                cfgLoggedMissing = true;
+            }
+            return;
+        }
+        cfgLoggedMissing = false;
+        String sigAfter = cfgSignature();
+        if (!sigBefore.equals(sigAfter)) {
+            log("配置已加载: enabled=" + cfgEnabled + " level=" + cfgLevel + "/" + cfgLevelName
+                    + " 阅读=" + cfgReaders + " 在读=" + cfgReading
+                    + " 日收益=" + cfgIncome + " 月稿费=" + cfgMonthly);
+        }
+    }
+
+    private static boolean cfgLoggedMissing = false;
+
+    /** 解析单个配置文件, 成功返回 true */
+    private static boolean parseConfigFile(File conf) {
+        if (conf == null || !conf.exists()) return false;
+        try {
             Map<String, String> kv = new HashMap<>();
             java.io.BufferedReader br = new java.io.BufferedReader(
                     new java.io.InputStreamReader(new java.io.FileInputStream(conf), "UTF-8"));
@@ -381,10 +411,16 @@ public class Main implements IXposedHookLoadPackage {
             if (kv.containsKey("reading")) cfgReading = kv.get("reading");
             if (kv.containsKey("income")) cfgIncome = kv.get("income");
             if (kv.containsKey("monthly")) cfgMonthly = kv.get("monthly");
-            log("配置读取成功: " + conf.getAbsolutePath());
+            return true;
         } catch (Throwable t) {
-            log("配置读取失败: " + t);
+            return false;
         }
+    }
+
+    /** 当前配置内容签名(用于检测变化) */
+    private static String cfgSignature() {
+        return (cfgEnabled ? "1" : "0") + "|" + cfgLevel + "|" + cfgLevelName + "|"
+                + cfgReaders + "|" + cfgReading + "|" + cfgIncome + "|" + cfgMonthly;
     }
 
     /** 追加写日志（进程内线程安全） */
