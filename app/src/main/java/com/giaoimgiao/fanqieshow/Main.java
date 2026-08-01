@@ -186,6 +186,34 @@ public class Main implements IXposedHookLoadPackage {
                     data.put("last_monthly_income", cfgMonthly);        // 月度收益
                 return root.toString();
             }
+            // ===== v2.6: account/info 等级数据源改写 —— 真正的等级切换 =====
+            // 该接口下发: author_level_id(当前等级ID) + point(当前等级分) + point_detail(明细)
+            // 伪造两者 -> App 本地用 point 对照 level_config.levels[].point 匹配到高等级对象,
+            // 卡片/颜色/权益全部自动切换(用户要求的"系统hook到真正的高等级").
+            if (url.contains("home/account/info")) {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                org.json.JSONObject data = root.optJSONObject("data");
+                if (data != null && cfgLevel != null && !cfgLevel.isEmpty()) {
+                    int[] tgt = levelTarget(cfgLevel);
+                    if (tgt != null) {
+                        data.put("author_level_id", tgt[0]);
+                        data.put("point", tgt[1]);
+                        // point_detail 明细同步: 总分全部并入成长分(task_point), 其余置0
+                        org.json.JSONArray pd = data.optJSONArray("point_detail");
+                        if (pd != null) {
+                            for (int i = 0; i < pd.length(); i++) {
+                                org.json.JSONObject o = pd.optJSONObject(i);
+                                if (o != null && "task_point".equals(o.optString("key"))) {
+                                    o.put("point", tgt[1]);
+                                } else if (o != null) {
+                                    o.put("point", 0);
+                                }
+                            }
+                        }
+                        return root.toString();
+                    }
+                }
+            }
             if (url.contains("level_config") && cfgLevelName != null && !cfgLevelName.isEmpty()) {
                 // v2.4: 等级卡"整卡替换" —— 用户当前等级(Lv.1, id=200)对象的全部样式字段
                 // 换成最高等级(Lv.4)的样式: 图标/勋章/背景/动效资源URL lv1->lv4(已逐一验证CDN存在),
@@ -233,6 +261,26 @@ public class Main implements IXposedHookLoadPackage {
             log("modifyResponse 异常: " + t);
         }
         return null;
+    }
+
+    /**
+     * v2.6: 配置等级 -> 目标等级 {author_level_id, point}
+     * level 配置: 0~5 = Lv.0~Lv.5, 6 = 金番作家(id=500), 7 = 殿堂作家(id=600)
+     * point 取超过目标阈值(确保匹配到该等级, Lv.5给20万远超市值).
+     */
+    private static int[] levelTarget(String lv) {
+        if (lv == null) return null;
+        switch (lv.trim()) {
+            case "0": return new int[]{100, 0};
+            case "1": return new int[]{200, 500};
+            case "2": return new int[]{300, 2000};
+            case "3": return new int[]{400, 6000};
+            case "4": return new int[]{416, 16000};
+            case "6": return new int[]{500, 200000}; // 金番作家(签约制, 无等级分, id直指)
+            case "7": return new int[]{600, 200000}; // 殿堂作家(签约制, 无等级分, id直指)
+            case "5": // Lv.5
+            default: return new int[]{432, 200000};
+        }
     }
 
     /** 钩住指定名字的所有回调方法（ttnet 内部类也覆盖） */
