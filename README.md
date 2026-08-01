@@ -61,7 +61,7 @@
 ## 技术原理
 
 - **注入点**：字节系 App 统一使用 ttnet Cronet 网络栈，hook 应用层最终回调 `VersionSafeCallbacks$UrlRequestCallback.onReadCompleted`，获取响应 ByteBuffer 后改写，天然兼容 Flutter 架构（libapp.so Dart AOT 字符串加密，静态分析不可行，网络层改写为最优解）。
-- **等级分溯源**：等级分不在 level_config / user/info / growth_task 等已记录接口中，最终定位到 `account/info` 响应：`point`（等级分）+ `point_detail`（创作分/成长分/稿费分/附加分明细）。
+- **等级分溯源**：定位到 `account/info` 响应：`point`（等级分）+ `point_detail`（创作分/成长分/稿费分/附加分明细）。
 - **Buffer 语义**：改写采用 `clear()+put()` 且**不调用 flip()**——Cronet 回调时 buffer 语义为 position=写入量，应用自行 flip 后读取。
 - **溢出保护**：替换后数据超过 buffer 容量时自动放弃改写，杜绝 `BufferOverflowException` 导致的"网络错误"。
 - **配置热更新**：每次响应前实时重载 `fanqieshow.conf`，修改配置即时生效，无需重启 App。
