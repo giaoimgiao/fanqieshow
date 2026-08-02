@@ -212,9 +212,9 @@ public class Main implements IXposedHookLoadPackage {
                     data.put("reader_uv_14day_count", cfgReading);     // 在读UV
                 return root.toString();
             }
-            // ===== v2.7: 质量分析-章节列表 stats/chapter_list/v0 =====
+            // ===== v2.7/v2.8: 质量分析-章节列表 stats/chapter_list/v0 =====
             // 两个模式: 章节读完率 read_completion_rate / 章节跟读率 follow_read_rate
-            // 统一替换为配置值(仅展示层)
+            // v2.8: 支持范围配置"90-99" -> 每章按index确定性伪随机波动(每章不同, 刷新不变, 更真实)
             if (url.contains("statistic/stats/chapter_list")) {
                 org.json.JSONObject root = new org.json.JSONObject(body);
                 org.json.JSONObject data = root.optJSONObject("data");
@@ -226,9 +226,9 @@ public class Main implements IXposedHookLoadPackage {
                         org.json.JSONObject c = arr.optJSONObject(i);
                         if (c == null) continue;
                         if (cfgCompleteRate != null && !cfgCompleteRate.isEmpty())
-                            c.put("read_completion_rate", cfgCompleteRate);
+                            c.put("read_completion_rate", varyRate(cfgCompleteRate, i));
                         if (cfgPursueRate != null && !cfgPursueRate.isEmpty())
-                            c.put("follow_read_rate", cfgPursueRate);
+                            c.put("follow_read_rate", varyRate(cfgPursueRate, i));
                     }
                     return root.toString();
                 }
@@ -327,6 +327,27 @@ public class Main implements IXposedHookLoadPackage {
             case "7": return new int[]{600, 200000}; // 殿堂作家(签约制, 无等级分, id直指)
             case "5": // Lv.5
             default: return new int[]{432, 200000};
+        }
+    }
+
+    /**
+     * v2.8: 章节率值生成. 支持两种配置:
+     *  单值 "95"      -> 所有章节统一 95
+     *  范围 "90-99"   -> 每章按 index 确定性伪随机在区间内取值(刷新不变, 各章不同, 更真实)
+     */
+    private static String varyRate(String cfg, int idx) {
+        int dash = cfg.indexOf('-');
+        if (dash <= 0) return cfg; // 无范围, 单值直返
+        try {
+            double lo = Double.parseDouble(cfg.substring(0, dash).trim());
+            double hi = Double.parseDouble(cfg.substring(dash + 1).trim());
+            if (hi <= lo) return cfg;
+            // 固定seed: 同一章每次刷新值一致, 避免"刷新就变"的违和感
+            java.util.Random r = new java.util.Random(idx * 1000003L + 0x9E3779B9L);
+            double v = lo + r.nextDouble() * (hi - lo);
+            return String.format("%.2f", v);
+        } catch (Throwable t) {
+            return cfg;
         }
     }
 
