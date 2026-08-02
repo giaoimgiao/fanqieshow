@@ -41,6 +41,11 @@ public class Main implements IXposedHookLoadPackage {
     private static volatile String cfgReading = "";
     private static volatile String cfgIncome = "";
     private static volatile String cfgMonthly = "";
+    // v2.7 新增
+    private static volatile String cfgReadIncome = "";   // 每日阅读收益
+    private static volatile String cfgTomatoIncome = ""; // X月番茄收益
+    private static volatile String cfgCompleteRate = ""; // 完读率
+    private static volatile String cfgPursueRate = "";   // 追读率
 
     // ---- 日志 ----
     private static String logPath = null;
@@ -184,7 +189,49 @@ public class Main implements IXposedHookLoadPackage {
                     data.put("last_read_count", cfgReaders);            // 阅读人数
                 if (cfgMonthly != null && !cfgMonthly.isEmpty())
                     data.put("last_monthly_income", cfgMonthly);        // 月度收益
+                // v2.7 新增: 每日阅读收益 / X月番茄收益 / 完读率
+                if (cfgReadIncome != null && !cfgReadIncome.isEmpty())
+                    data.put("last_daily_read_income", cfgReadIncome);  // 每日阅读收益
+                if (cfgTomatoIncome != null && !cfgTomatoIncome.isEmpty())
+                    data.put("last_monthly_novel_income", cfgTomatoIncome); // X月番茄收益
+                if (cfgCompleteRate != null && !cfgCompleteRate.isEmpty())
+                    data.put("last_read_complete_rate", cfgCompleteRate);   // 完读率
                 return root.toString();
+            }
+            // ===== v2.7: 质量分析/概览新接口 stats/book_common/v1 =====
+            // 完读率 read_completion_rate / 追读率 pursue_read_rate / 在读UV
+            if (url.contains("statistic/stats/book_common")) {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                org.json.JSONObject data = root.optJSONObject("data");
+                if (data == null) return null;
+                if (cfgCompleteRate != null && !cfgCompleteRate.isEmpty())
+                    data.put("read_completion_rate", cfgCompleteRate); // 完读率
+                if (cfgPursueRate != null && !cfgPursueRate.isEmpty())
+                    data.put("pursue_read_rate", cfgPursueRate);       // 追读率
+                if (cfgReading != null && !cfgReading.isEmpty())
+                    data.put("reader_uv_14day_count", cfgReading);     // 在读UV
+                return root.toString();
+            }
+            // ===== v2.7: 质量分析-章节列表 stats/chapter_list/v0 =====
+            // 两个模式: 章节读完率 read_completion_rate / 章节跟读率 follow_read_rate
+            // 统一替换为配置值(仅展示层)
+            if (url.contains("statistic/stats/chapter_list")) {
+                org.json.JSONObject root = new org.json.JSONObject(body);
+                org.json.JSONObject data = root.optJSONObject("data");
+                if (data == null) return null;
+                org.json.JSONArray arr = data.optJSONArray("chapter_stats_list");
+                if (arr != null && (cfgCompleteRate != null && !cfgCompleteRate.isEmpty()
+                        || cfgPursueRate != null && !cfgPursueRate.isEmpty())) {
+                    for (int i = 0; i < arr.length(); i++) {
+                        org.json.JSONObject c = arr.optJSONObject(i);
+                        if (c == null) continue;
+                        if (cfgCompleteRate != null && !cfgCompleteRate.isEmpty())
+                            c.put("read_completion_rate", cfgCompleteRate);
+                        if (cfgPursueRate != null && !cfgPursueRate.isEmpty())
+                            c.put("follow_read_rate", cfgPursueRate);
+                    }
+                    return root.toString();
+                }
             }
             // ===== v2.6: account/info 等级数据源改写 —— 真正的等级切换 =====
             // 该接口下发: author_level_id(当前等级ID) + point(当前等级分) + point_detail(明细)
@@ -499,8 +546,13 @@ public class Main implements IXposedHookLoadPackage {
             if (kv.containsKey("readers")) cfgReaders = kv.get("readers");
             if (kv.containsKey("reading")) cfgReading = kv.get("reading");
             if (kv.containsKey("income")) cfgIncome = kv.get("income");
-            if (kv.containsKey("monthly")) cfgMonthly = kv.get("monthly");
-            return true;
+        if (kv.containsKey("monthly")) cfgMonthly = kv.get("monthly");
+        // v2.7 新增
+        if (kv.containsKey("read_income")) cfgReadIncome = kv.get("read_income");
+        if (kv.containsKey("tomato_income")) cfgTomatoIncome = kv.get("tomato_income");
+        if (kv.containsKey("complete_rate")) cfgCompleteRate = kv.get("complete_rate");
+        if (kv.containsKey("pursue_rate")) cfgPursueRate = kv.get("pursue_rate");
+        return true;
         } catch (Throwable t) {
             return false;
         }
@@ -509,7 +561,8 @@ public class Main implements IXposedHookLoadPackage {
     /** 当前配置内容签名(用于检测变化) */
     private static String cfgSignature() {
         return (cfgEnabled ? "1" : "0") + "|" + cfgLevel + "|" + cfgLevelName + "|"
-                + cfgReaders + "|" + cfgReading + "|" + cfgIncome + "|" + cfgMonthly;
+                + cfgReaders + "|" + cfgReading + "|" + cfgIncome + "|" + cfgMonthly + "|"
+                + cfgReadIncome + "|" + cfgTomatoIncome + "|" + cfgCompleteRate + "|" + cfgPursueRate;
     }
 
     /** 追加写日志（进程内线程安全） */
