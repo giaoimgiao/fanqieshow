@@ -46,6 +46,9 @@ public class Main implements IXposedHookLoadPackage {
     private static volatile String cfgTomatoIncome = ""; // X月番茄收益
     private static volatile String cfgCompleteRate = ""; // 完读率
     private static volatile String cfgPursueRate = "";   // 追读率
+    // v2.9 新增: 逐章覆盖 "0:93.5,1:92.1,..." (index:值)
+    private static volatile String cfgChapterComplete = "";
+    private static volatile String cfgChapterFollow = "";
 
     // ---- 日志 ----
     private static String logPath = null;
@@ -212,23 +215,26 @@ public class Main implements IXposedHookLoadPackage {
                     data.put("reader_uv_14day_count", cfgReading);     // 在读UV
                 return root.toString();
             }
-            // ===== v2.7/v2.8: 质量分析-章节列表 stats/chapter_list/v0 =====
+            // ===== v2.7/v2.8/v2.9: 质量分析-章节列表 stats/chapter_list/v0 =====
             // 两个模式: 章节读完率 read_completion_rate / 章节跟读率 follow_read_rate
-            // v2.8: 支持范围配置"90-99" -> 每章按index确定性伪随机波动(每章不同, 刷新不变, 更真实)
+            // v2.8: 范围配置"90-99" -> 每章确定性伪随机; v2.9: 逐章覆盖(优先) + 章节列表导出给前端
             if (url.contains("statistic/stats/chapter_list")) {
                 org.json.JSONObject root = new org.json.JSONObject(body);
                 org.json.JSONObject data = root.optJSONObject("data");
                 if (data == null) return null;
                 org.json.JSONArray arr = data.optJSONArray("chapter_stats_list");
                 if (arr != null && (cfgCompleteRate != null && !cfgCompleteRate.isEmpty()
-                        || cfgPursueRate != null && !cfgPursueRate.isEmpty())) {
+                        || cfgPursueRate != null && !cfgPursueRate.isEmpty()
+                        || cfgChapterComplete != null && !cfgChapterComplete.isEmpty()
+                        || cfgChapterFollow != null && !cfgChapterFollow.isEmpty())) {
+                    exportChapters(arr); // v2.9: 导出章节列表给前端UI
                     for (int i = 0; i < arr.length(); i++) {
                         org.json.JSONObject c = arr.optJSONObject(i);
                         if (c == null) continue;
                         if (cfgCompleteRate != null && !cfgCompleteRate.isEmpty())
-                            c.put("read_completion_rate", varyRate(cfgCompleteRate, i));
+                            c.put("read_completion_rate", chapterValue(cfgCompleteRate, cfgChapterComplete, i));
                         if (cfgPursueRate != null && !cfgPursueRate.isEmpty())
-                            c.put("follow_read_rate", varyRate(cfgPursueRate, i));
+                            c.put("follow_read_rate", chapterValue(cfgPursueRate, cfgChapterFollow, i));
                     }
                     return root.toString();
                 }
@@ -351,6 +357,66 @@ public class Main implements IXposedHookLoadPackage {
         }
     }
 
+    /**
+     * v2.9: 章节率取值. 优先级: 逐章覆盖(chCfg) > 范围/单值(cfg).
+     */
+    private static String chapterValue(String cfg, String chCfg, int idx) {
+        String ov = getChapterOverride(chCfg, idx);
+        if (ov != null) return ov;
+        return varyRate(cfg, idx);
+    }
+
+    /** 解析逐章覆盖配置 "0:93.5,1:92.1" -> 第idx章的值, 无则null */
+    private static String getChapterOverride(String chCfg, int idx) {
+        if (chCfg == null || chCfg.isEmpty()) return null;
+        try {
+            for (String part : chCfg.split(",")) {
+                int colon = part.indexOf(':');
+                if (colon > 0 && Integer.parseInt(part.substring(0, colon).trim()) == idx) {
+                    return part.substring(colon + 1).trim();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /** v2.9: 导出章节列表(总章数+每章标题)到前端UI读取文件 (sdcard优先, 失败则App私有目录) */
+    private static void exportChapters(org.json.JSONArray arr) {
+        try {
+            StringBuilder sb = new StringBuilder("{\"total\":").append(arr.length()).append(",\"chapters\":[");
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject c = arr.optJSONObject(i);
+                if (c == null) continue;
+                String t = c.optString("title", "第" + (i + 1) + "章");
+                sb.append("{\"idx\":").append(i).append(",\"title\":\"")
+                        .append(t.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ")).append("\"},");
+            }
+            if (arr.length() > 0) sb.setLength(sb.length() - 1);
+            sb.append("]}");
+            byte[] bytes = sb.toString().getBytes("UTF-8");
+            boolean ok = false;
+            try {
+                java.io.File f = new java.io.File("/sdcard/Download/fanqieshow_chapters.json");
+                java.io.FileOutputStream fos = new java.io.FileOutputStream(f);
+                fos.write(bytes);
+                fos.close();
+                ok = true;
+            } catch (Throwable ignored) {
+            }
+            try {
+                java.io.File f2 = new java.io.File("/data/data/com.bytedance.writer_assistant_flutter/files/fanqieshow_chapters.json");
+                java.io.FileOutputStream fos2 = new java.io.FileOutputStream(f2);
+                fos2.write(bytes);
+                fos2.close();
+                ok = true;
+            } catch (Throwable ignored) {
+            }
+            if (ok) log("    章节列表已导出 " + arr.length() + " 章");
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** 钩住指定名字的所有回调方法（ttnet 内部类也覆盖） */
     private void hookCallback(Class<?> clazz, final String methodName) {
         try {
@@ -456,6 +522,8 @@ public class Main implements IXposedHookLoadPackage {
     /** 是否是需要关注的业务接口 */
     private static boolean isInteresting(String url) {
         String u = url.toLowerCase();
+        // v2.9: 放宽为记录所有 /app/ 接口(含字数完读等未知名接口), 便于抓包定位
+        if (u.contains("/app/")) return true;
         return u.contains("/statistic/") || u.contains("level_config") || u.contains("income")
             || u.contains("book_daily") || u.contains("book_summary") || u.contains("monthly")
             || u.contains("user/info") || u.contains("wallet") || u.contains("medal")
@@ -573,6 +641,9 @@ public class Main implements IXposedHookLoadPackage {
         if (kv.containsKey("tomato_income")) cfgTomatoIncome = kv.get("tomato_income");
         if (kv.containsKey("complete_rate")) cfgCompleteRate = kv.get("complete_rate");
         if (kv.containsKey("pursue_rate")) cfgPursueRate = kv.get("pursue_rate");
+        // v2.9: 逐章覆盖
+        if (kv.containsKey("chapter_complete_rate")) cfgChapterComplete = kv.get("chapter_complete_rate");
+        if (kv.containsKey("chapter_follow_rate")) cfgChapterFollow = kv.get("chapter_follow_rate");
         return true;
         } catch (Throwable t) {
             return false;
@@ -583,7 +654,8 @@ public class Main implements IXposedHookLoadPackage {
     private static String cfgSignature() {
         return (cfgEnabled ? "1" : "0") + "|" + cfgLevel + "|" + cfgLevelName + "|"
                 + cfgReaders + "|" + cfgReading + "|" + cfgIncome + "|" + cfgMonthly + "|"
-                + cfgReadIncome + "|" + cfgTomatoIncome + "|" + cfgCompleteRate + "|" + cfgPursueRate;
+                + cfgReadIncome + "|" + cfgTomatoIncome + "|" + cfgCompleteRate + "|" + cfgPursueRate + "|"
+                + cfgChapterComplete + "|" + cfgChapterFollow;
     }
 
     /** 追加写日志（进程内线程安全） */
